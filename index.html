@@ -1,0 +1,460 @@
+<!doctype html>
+<html class="no-js" lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	
+    <title>Foundation Starter Template</title>
+
+    <script src="js/vendor/jquery.js"></script>
+    <script src="js/vendor/foundation.min.js"></script>
+    <script src="js/vendor/what-input.js"></script>
+    <script src="Web3.js"></script>
+
+
+    <script>
+        $(document).ready(function () {
+            var contract;
+            var shop;
+
+            // if (typeof web3 !== 'undefined') {
+            web3 = new Web3();
+            // } else {
+            //     // set the provider you want from Web3.providers
+            //     web3 = new Web3(new Web3.providers.HttpProvider("http://localhost:8545"));
+            // }
+
+            // need time to load web3
+            setTimeout(function () {
+                contract = web3.eth.contract("abi");
+                shop = contract.at("0x7c8cc0de9822bb4afba137ea3fca14a90ec1d879");
+                console.log(web3.eth.coinbase);
+                shop.isAdmin(function (error, result) {
+                    if (!error) {
+                        if (result === true) {
+                            buildAdminUI();
+                        } else {
+                            buildClientUI();
+                        }
+                    } else {
+                        console.error(error);
+                    }
+                });
+            }, 100);
+
+            function buildAdminUI() {
+                console.log("admin");
+                loadProducts(adminProduct);
+                loadDelivery();
+                loadOrder();
+                $("button.add-product").click(function (event) {
+                    var name = $("#products").find("input[name='name']").val();
+                    var description = $("#products").find("input[name='description']").val();
+                    var price = $("#products").find("input[name='price']").val();
+                    shop.addProduct(name, price, description, true, function (error, result) {
+                        if (!error) {
+                            $("#products").find("tr.item").remove();
+                            loadProducts(adminProduct);
+                        } else {
+                            console.error(error);
+                        }
+                    });
+                    $("#products").find("input[name='name']").val("");
+                    $("#products").find("input[name='description']").val("");
+                    $("#products").find("input[name='price']").val("");
+                });
+                $("button.add-delivery").click(function (event) {
+                    var address = $("#delivery").find("input[name='address']").val();
+                    var addressName = $("#delivery").find("input[name='address-name']").val();
+                    shop.addDelivery(address, addressName, function (error, result) {
+                        if (!error) {
+                            $("#delivery").find("tr.item").remove();
+                            loadDelivery();
+                        } else {
+                            console.error(error);
+                        }
+                    });
+                    $("#delivery").find("input[name='address']").val("");
+                    $("#delivery").find("input[name='address-name']").val("");
+                });
+                $("#adminProductAdd").show();
+            }
+
+            function buildClientUI() {
+                console.log("client");
+                loadProducts(clientProduct);
+            }
+
+            function adminProduct(result) {
+                var id = result[0].c[0];
+                var active = result[4];
+                var tr = $("<tr/>", { class: "item c" + (id % 2) });
+                tr.append($("<td/>").text(id));
+                tr.append($("<td/>").text(web3.toAscii(result[1])));
+                tr.append($("<td/>").text(web3.toAscii(result[3])));
+                tr.append($("<td/>").text(result[2].c[0]));
+                var tdButton = $("<td/>");
+                if (active === true) {
+                    tdButton.append(createDeactivateButton(id));
+                }
+                tr.append(tdButton);
+                $("#products").append(tr);
+            }
+
+            function clientProduct(result) {
+                var active = result[4];
+                if (active === false) return;
+                var id = result[0].c[0];
+                var price = result[2].c[0];
+                var tr = $("<tr/>", { class: "item c" + (id % 2) });
+                tr.append($("<td/>").text(id));
+                tr.append($("<td/>").text(web3.toAscii(result[1])));
+                tr.append($("<td/>").text(web3.toAscii(result[3])));
+                tr.append($("<td/>").text(price));
+                tr.append($("<td/>").append(createBuyButton(id, price)));
+                $("#products").append(tr);
+            }
+
+            function createDeactivateButton(id) {
+                return $("<button/>", {
+                    class: "ui-button deactivate button",
+                    value: id,
+                    text: "Deactivate",
+                    click: function () {
+                        var id = $(this).attr("value");
+                        var self = this;
+                        shop.deactivate(id, function (error, result) {
+                            if (!error) {
+                                $(self).remove();
+                            } else {
+                                console.error(error);
+                            }
+                        });
+                    }
+                });
+            }
+
+            function createBuyButton(id, price) {
+                return $("<button/>", {
+                    class: "ui-button buy button",
+                    value: id,
+                    text: "Buy",
+                    click: function () {
+                        $(".order-wrapper").show();
+                        $(".submit").click(function (event) {
+                            var id = $(this).attr("value");
+                            var self = this;
+                            var destination = $("#clientOrderForm").find("input[name='destination']").val();
+                            var code = $("#clientOrderForm").find("input[name='code']").val();
+                            $(".order-wrapper").hide();
+                            console.log(web3.sha3(code));
+                            shop.order(id, destination, web3.sha3(code), {
+                                //from: web3.eth.accounts[0],
+                                value: price
+                            }, function (error, result) {
+                                if (!error) {
+                                    showPopup(result);
+                                } else {
+                                    console.error(error);
+                                }
+                            });
+                            $(".submit").unbind('click');
+                        });
+                        $(".close-x").click(function () {
+                            $(".order-wrapper").hide();
+                        })
+                        $(document).mouseup(function (e) {
+                            var popup = $("#clientOrderForm");
+                            if (!popup.is(e.target)
+                                && popup.has(e.target).length === 0) {
+                                $(".order-wrapper").hide();
+                            }
+                        });
+                    }
+                });
+            }
+
+            function loadProducts(consumer) {
+                shop.productsLength(function (error, result) {
+                    if (!error) {
+                        var productsLength = result.c[0];
+                        for (i = 0; i < productsLength; i++) {
+                            shop.products(i, function (error, result) {
+                                if (!error) {
+                                    consumer(result);
+                                } else {
+                                    console.error(error);
+                                }
+                            })
+                        }
+                    } else {
+                        console.error(error);
+                    }
+                });
+            }
+
+            function loadDelivery() {
+                shop.deliveryLength(function (error, result) {
+                    if (!error) {
+                        var deliveryLength = result.c[0];
+                        for (i = 0; i < deliveryLength; i++) {
+                            shop.delivery(i, function (error, result) {
+                                if (!error) {
+                                    var tr = $("<tr/>", { class: "item c0" });
+                                    tr.append($("<td/>").text(result.addressName));
+                                    tr.append($("<td/>").text(result.address));
+                                    tr.append($("<td/>").append(createRadio(result)));
+                                    $("#delivery").append(tr);
+                                } else {
+                                    console.error(error);
+                                }
+                            })
+                        }
+                    } else {
+                        console.error(error);
+                    }
+                });
+            }
+
+            function createRadio(address) {
+                return $("<input/>", {
+                    type: "radio",
+                    name: "orderDelivery",
+                    value: address
+                });
+            }
+
+            function loadOrder() {
+                shop.ordersLength(function (error, result) {
+                    if (!error) {
+                        var ordersLength = result.c[0];
+                        console.log(ordersLength);
+                        shop.lastOrder(function (error, result) {
+                            if (!error) {
+                                var lastOrder = result.c[0];
+                                console.log(lastOrder);
+                                if (ordersLength > lastOrder) {
+                                    shop.orders(lastOrder, function (error, result) {
+                                        if (!error) {
+                                            //$("#order").find("tr.item").remove();
+                                            var tr = $("<tr/>", { class: "item c0" });
+                                            tr.append($("<td/>").text(result[0].c[0]));
+                                            tr.append($("<td/>").text(result[1].c[0]));
+                                            tr.append($("<td/>").text(result[2]));
+                                            tr.append($("<td/>").text(web3.toAscii(result[3])));
+                                            tr.append($("<td/>").append(createAssignButton()));
+                                            $("#order").append(tr);
+                                        } else {
+                                            console.error(error);
+                                        }
+                                    })
+                                }
+                            } else {
+                                console.error(error);
+                            }
+                        });
+                    } else {
+                        console.error(error);
+                    }
+                });
+            }
+
+            function createAssignButton() {
+                return $("<button/>", {
+                    class: "ui-button button select",
+                    text: "Select delivery",
+                    click: function () {
+                        $(".delivery-wrapper").show();
+                        $(".assign").click(function (event, address) {
+                            var address = $("input[name='orderDelivery']").val();
+                            var self = this;
+                            var radioChecked = $("input[name='orderDelivery']:checked");
+                            if (radioChecked[0]) {
+                                radioChecked[0].checked = false;
+                            }
+                            $(".delivery-wrapper").hide();
+                            console.log(address);
+                            shop.assign(address, function (error, result) {
+                                if (!error) {
+                                    $("#order").find("tr.item").remove();
+                                    setTimeout(function () {
+                                        loadOrder();
+                                    }, 8000);
+                                    showPopup(result);
+                                } else {
+                                    console.error(error);
+                                }
+                            });
+                            $(".assign").unbind('click');
+                        });
+                        $(".close-x").click(function () {
+                            $(".delivery-wrapper").hide();
+                            var radioChecked = $("input[name='orderDelivery']:checked");
+                            if (radioChecked[0]) {
+                                radioChecked[0].checked = false;
+                            }
+                        });
+                        $(document).mouseup(function (e) {
+                            var popup = $("#delivery-block");
+                            if (!popup.is(e.target)
+                                && popup.has(e.target).length === 0) {
+                                $(".delivery-wrapper").hide();
+                            }
+                            var radioChecked = $("input[name='orderDelivery']:checked");
+                            if (radioChecked[0]) {
+                                radioChecked[0].checked = false;
+                            }
+                        });
+                    }
+                });
+            }
+        });
+		
+		function showPopup(newText) {
+			$(".alert-popup .insert-text").text(newText);
+			$(".alert-popup").fadeIn("fast");
+			$(document).mouseup(function (e) {
+                var popup = $(".alert-popup");
+                if (!popup.is(e.target)
+                && popup.has(e.target).length === 0) {
+					$(".alert-popup").hide();
+                }
+			})
+			$(".alert-popup .close-x").click(function() {
+				hidePopup();
+			});
+			$(".alert-popup .ok-button-close").click(function() {
+				hidePopup();
+			})
+		}
+		
+		function hidePopup() {
+			$(".alert-popup").hide();
+		};
+		
+    </script>
+
+    <link rel="stylesheet" href="css/foundation.css">
+    <link rel="stylesheet" href="css/style.css">
+
+</head>
+
+<body>
+    <div class="conteiner">
+        <div class="row">
+            <div class="columns medium-6">
+                <ul class="tabs" data-tabs id="example-tabs">
+                    <li class="tabs-title is-active">
+                        <a href="#panel1" aria-selected="true">Products manager</a>
+                    </li>
+                    <li class="tabs-title">
+                        <a href="#panel2">Delivery and order manager</a>
+                    </li>
+                </ul>
+
+                <div class="tabs-content" data-tabs-content="example-tabs">
+                    <div class="tabs-panel is-active" id="panel1">
+                        <div id="products-block">
+                            <h3>Products</h3>
+                            <table id="products">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Description</th>
+                                    <th>Price</th>
+                                    <th></th>
+                                </tr>
+                                <tr id="adminProductAdd" class="input-line">
+                                    <td></td>
+                                    <td>
+                                        <input type="text" name="name" />
+                                    </td>
+                                    <td>
+                                        <input type="text" name="description" />
+                                    </td>
+                                    <td>
+                                        <input type="text" name="price" />
+                                    </td>
+                                    <td>
+                                        <button class="ui-button add-product button">Add product</button>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="tabs-panel" id="panel2">
+                        <div id="order-block">
+                            <h3>Active order</h3>
+                            <table id="order">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>ProductId</th>
+                                    <th>Buyer</th>
+                                    <th>Destination</th>
+                                    <th></th>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="wrapper delivery-wrapper">
+        <div id="delivery-block" class="popup">
+            <div class="close-x">X</div>
+            <h3>Delivery</h3>
+            <table id="delivery">
+                <tr>
+                    <th>Name</th>
+                    <th>Address</th>
+                    <th></th>
+                </tr>
+                <tr class="input-line">
+                    <td>
+                        <input type="text" name="address-name" />
+                    </td>
+                    <td>
+                        <input type="text" name="address" />
+                    </td>
+                    <td>
+                        <button class="ui-button add-delivery button">Add delivery</button>
+                    </td>
+                </tr>
+            </table>
+            <button class="assign button">Assign</button>
+        </div>
+    </div>
+
+    <div class="wrapper order-wrapper">
+        <div id="clientOrderForm" class="popup">
+            <div class="close-x">X</div>
+            <h3>Order form</h3>
+            <label>Destination:
+                <input type="text" name="destination" value="zzz" />
+            </label>
+            <br/>
+            <label>Code:
+                <input type="text" name="code" value="zzz" />
+            </label>
+            <button class="submit button">Submit</button>
+        </div>
+    </div>
+
+	<div class="alert-popup">
+		<div class="close-x">X</div>
+		<p class="insert-text"></p>
+		<button class="ui-button ok-button-close button">OK</button>
+	</div>
+	
+    <script>
+        $(document).foundation();
+    </script>
+
+</body>
+
+</html>
